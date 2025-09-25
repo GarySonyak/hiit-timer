@@ -1,4 +1,4 @@
-const CACHE = 'hiit-timer-v2';
+const CACHE = 'hiit-timer-v3';
 const ASSETS = [
   './',
   './index.html',
