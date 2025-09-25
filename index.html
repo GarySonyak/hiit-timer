@@ -237,8 +237,6 @@ if ('serviceWorker' in navigator) {
     return (done + cur) / totalDur;
   }
 
-  def_lefts = {240:1,180:1,120:1,60:1,1:1}
-
   function totalRemaining(){
     let r = remaining();
     for(let k=iSeg+1;k<segments.length;k++) r += segments[k].dur;
@@ -302,15 +300,10 @@ if ('serviceWorker' in navigator) {
   }
   function skip(){ if(iSeg < segments.length-1){ startSegment(iSeg+1); if(!paused) raf=requestAnimationFrame(tick);} }
 
-  document.getElementById('startBtn').addEventListener('click',start);
-  document.getElementById('pauseBtn').addEventListener('click',pause);
-  document.getElementById('resetBtn').addEventListener('click',reset);
-  document.getElementById('skipBtn').addEventListener('click',skip);
-
-  // Animation loop hook
-  let raf = null;
-  function loop(){ if(!paused){ tick(); } }
-  // but we already schedule via tick -> requestAnimationFrame in start()
+  startBtn.addEventListener('click',start);
+  pauseBtn.addEventListener('click',pause);
+  resetBtn.addEventListener('click',reset);
+  skipBtn.addEventListener('click',skip);
 
   reset();
 })();
