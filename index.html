@@ -88,21 +88,25 @@ if ('serviceWorker' in navigator) {
 (function(){
   const exercises = ["Burpees","Push-ups","Air squats","Mountain climbers","Plank shoulder taps"];
   const segments = [];
+  // Warm-up 5:00
   segments.push({type:"warmup", label:"Warm-up", sub:"Mobility + easy jumps", dur:300});
+  // HIIT 15:00
   for(let round=1; round<=4; round++){
     for(let i=0;i<exercises.length;i++){
       const ex = exercises[i];
-      segments.push({type:"work", label:`HIIT — Round ${round}/4`, sub:ex, dur:30});
-      segments.push({type:"rest", label:`Rest`, sub:"", dur:15, next: exercises[(i+1)%exercises.length]});
+      segments.push({type:"work", label:`HIIT — Round ${round}/4`, name:ex, dur:30});
+      // 'next' is next exercise name
+      segments.push({type:"rest", label:`Rest`, dur:15, next: exercises[(i+1)%exercises.length]});
     }
   }
+  // Core finisher 5:00 (two laps) — use 'name' for work items so we can speak names
   const fin = [
-    {type:"work", label:"Core — X-ups", sub:"30 s", dur:30},
-    {type:"rest", label:"Rest", sub:"", dur:15, next:"Hollow hold"},
-    {type:"work", label:"Core — Hollow hold", sub:"30 s", dur:30},
-    {type:"rest", label:"Rest", sub:"", dur:15, next:"Plank"},
-    {type:"work", label:"Core — Plank", sub:"45 s", dur:45},
-    {type:"rest", label:"Rest", sub:"", dur:15, next:"X-ups"},
+    {type:"work", label:"Core", name:"X-ups", dur:30},
+    {type:"rest", label:"Rest", dur:15, next:"Hollow hold"},
+    {type:"work", label:"Core", name:"Hollow hold", dur:30},
+    {type:"rest", label:"Rest", dur:15, next:"Plank"},
+    {type:"work", label:"Core", name:"Plank", dur:45},
+    {type:"rest", label:"Rest", dur:15, next:"X-ups"},
   ];
   fin.forEach(s=>segments.push({...s}));
   fin.forEach(s=>segments.push({...s}));
@@ -126,15 +130,18 @@ if ('serviceWorker' in navigator) {
   const resetBtn = document.getElementById('resetBtn');
   const skipBtn = document.getElementById('skipBtn');
 
+  // Render list
   const totalDur = segments.reduce((a,s)=>a+s.dur,0);
   segments.forEach((s,i)=>{
     const li = document.createElement('li');
     const mm = Math.floor(s.dur/60).toString().padStart(2,'0');
     const ss = (s.dur%60).toString().padStart(2,'0');
-    li.textContent = `${(i+1).toString().padStart(2,'0')}. ${s.label}${s.sub?` — ${s.sub}`:''}${s.next?` (next: ${s.next})`:''} • ${mm}:${ss}`;
+    const name = s.name ? ` — ${s.name}` : (s.next ? ` (next: ${s.next})` : '');
+    li.textContent = `${(i+1).toString().padStart(2,'0')}. ${s.label}${name} • ${mm}:${ss}`;
     list.appendChild(li);
   });
 
+  // State
   let iSeg = 0;
   let segStart = null;
   let paused = true;
@@ -143,6 +150,7 @@ if ('serviceWorker' in navigator) {
   let audioCtx = null;
   let wakeLock = null;
   let lastBeepSec = Infinity;
+  let warmTimers = []; // scheduled warm-up voice cues
 
   function fmt(t){
     t = Math.max(0,Math.floor(t));
@@ -161,14 +169,28 @@ if ('serviceWorker' in navigator) {
     }catch(e){}
   }
 
-  function cueWarmup(t){
+  function scheduleWarmupCues(){
+    // Clear previous
+    warmTimers.forEach(id => clearTimeout(id));
+    warmTimers = [];
     if(!detailWarmCoreTg.checked) return;
-    const m = Math.ceil((300 - t)/60);
-    if(m===1) speak('Warm-up minute one: hip circles and arm swings.');
-    else if(m===2) speak('Minute two: leg swings front to back, and side to side.');
-    else if(m===3) speak('Minute three: inchworms or plank shoulder taps.');
-    else if(m===4) speak('Minute four: easy jumping jacks.');
-    else if(m===5) speak('Minute five: breathe and prep for HIIT.');
+    const cues = [
+      [0,   'Warm-up minute one: hip circles and arm swings.'],
+      [60,  'Minute two: leg swings front to back and side to side.'],
+      [120, 'Minute three: inchworms or plank shoulder taps.'],
+      [180, 'Minute four: easy jumping jacks.'],
+      [240, 'Minute five: breathe and prep for HIIT.']
+    ];
+    const startAt = Date.now();
+    cues.forEach(([sec, text])=>{
+      const id = setTimeout(()=>{ speak(text); }, sec*1000);
+      warmTimers.push(id);
+    });
+  }
+
+  function clearWarmupCues(){
+    warmTimers.forEach(id => clearTimeout(id));
+    warmTimers = [];
   }
 
   function beep(){
@@ -194,8 +216,16 @@ if ('serviceWorker' in navigator) {
   }
 
   function setPhaseUI(s){
-    elPhase.textContent = s.type==='work' ? 'Work' : (s.type==='rest' ? 'Rest' : (s.type==='warmup' ? 'Warm-up' : 'Finisher'));
-    elLabel.textContent = s.sub ? `${s.label} — ${s.sub}` : (s.next ? `${s.label} — Next: ${s.next}` : s.label);
+    const phaseText = s.type==='work' ? 'Work' : (s.type==='rest' ? 'Rest' : (s.type==='warmup' ? 'Warm-up' : 'Finisher'));
+    elPhase.textContent = phaseText;
+    // Show current or next name in label
+    if(s.type==='work'){
+      elLabel.textContent = `${s.label}${s.name ? ' — ' + s.name : ''}`;
+    } else if(s.type==='rest'){
+      elLabel.textContent = s.next ? `${s.label} — Next: ${s.next}` : s.label;
+    } else {
+      elLabel.textContent = s.label;
+    }
     segFill.className = 'fill ' + (s.type==='rest'?'rest':'');
   }
 
@@ -206,15 +236,24 @@ if ('serviceWorker' in navigator) {
     elClock.textContent = fmt(remaining());
     segHint.textContent = `Segment ${iSeg+1}/${segments.length}`;
     totHint.textContent = `Total ${Math.round(progressTotal()*100)}%`;
+
+    clearWarmupCues();
     if(iSeg===0){
       speak('Warm up for five minutes. Easy pace.');
+      scheduleWarmupCues();
     } else if(s.type==='work'){
-      speak(`${s.sub||'Go'}. Thirty seconds. 3 2 1 go.`);
+      if(s.label.startsWith('Core')){
+        // Core work: speak exercise names
+        const duration = s.dur;
+        const durText = duration===45 ? 'Forty-five seconds' : 'Thirty seconds';
+        speak(`Core — ${s.name}. ${durText}. 3 2 1 go.`);
+      } else {
+        // HIIT work
+        speak(`${s.name||'Go'}. Thirty seconds. 3 2 1 go.`);
+      }
     } else if(s.type==='rest'){
       if(nextCueTg.checked && s.next) speak(`Rest. Fifteen seconds. Next: ${s.next}.`);
       else speak('Rest. Fifteen seconds.');
-    } else {
-      if(detailWarmCoreTg.checked) speak('Core finisher.');
     }
   }
 
@@ -255,16 +294,12 @@ if ('serviceWorker' in navigator) {
       lastBeepSec = sec; if(beepTg.checked) beep(); if(vibrateTg.checked && navigator.vibrate) navigator.vibrate(40);
     }
 
-    if(s.type==='warmup'){
-      const left = Math.round(rem);
-      if ([240,180,120,60,1].includes(left)) cueWarmup(left);
-    }
-
     if(rem<=0.05){
       if(iSeg < segments.length-1){
         startSegment(iSeg+1);
       } else {
-        cancelAnimationFrame(raf); paused=true; elPhase.textContent='Done!'; elLabel.textContent='Great job — full 25 minutes complete.'; speak('Workout complete. Great job.');
+        paused=true; cancelAnimationFrame(raf);
+        elPhase.textContent='Done!'; elLabel.textContent='Great job — full 25 minutes complete.'; speak('Workout complete. Great job.');
         segFill.style.width='100%'; totFill.style.width='100%';
         if(vibrateTg.checked && navigator.vibrate) navigator.vibrate([120,60,120]);
         return;
@@ -293,17 +328,18 @@ if ('serviceWorker' in navigator) {
   function reset(){
     paused=true; cancelAnimationFrame(raf);
     iSeg=0; segStart=null; elapsedPaused=0; lastBeepSec=Infinity;
-    setPhaseUI({type:'warmup',label:'Ready',sub:'Tap START',dur:1});
+    clearWarmupCues();
+    setPhaseUI({type:'warmup',label:'Ready',dur:1});
     elClock.textContent='25:00';
     segFill.style.width='0%'; segHint.textContent=`Segment 0/${segments.length}`;
     totFill.style.width='0%'; totHint.textContent='Total 0%';
   }
   function skip(){ if(iSeg < segments.length-1){ startSegment(iSeg+1); if(!paused) raf=requestAnimationFrame(tick);} }
 
-  startBtn.addEventListener('click',start);
-  pauseBtn.addEventListener('click',pause);
-  resetBtn.addEventListener('click',reset);
-  skipBtn.addEventListener('click',skip);
+  document.getElementById('startBtn').addEventListener('click',start);
+  document.getElementById('pauseBtn').addEventListener('click',pause);
+  document.getElementById('resetBtn').addEventListener('click',reset);
+  document.getElementById('skipBtn').addEventListener('click',skip);
 
   reset();
 })();
